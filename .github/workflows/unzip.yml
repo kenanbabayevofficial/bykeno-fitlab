@@ -1,4 +1,6 @@
 name: Unzip and Build
+permissions:
+  contents: write
 on: push
 jobs:
   unzip:
