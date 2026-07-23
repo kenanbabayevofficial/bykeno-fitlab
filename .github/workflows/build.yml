@@ -1,156 +1,41 @@
-name: Build bykeno Google Fit v4
-on: [push, workflow_dispatch]
+name: Build bykeno APK
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
-        with: { java-version: '17', distribution: 'temurin' }
-      - uses: android-actions/setup-android@v3
-      - uses: gradle/actions/setup-gradle@v3
-        with: { gradle-version: 8.5 }
-      - name: Create Google Fit project
+
+      - name: Unzip fixed project
         run: |
           rm -rf app
-          mkdir -p app/src/main/java/com/bykeno/fitlab app/src/main/res/layout
-          cat > settings.gradle << 'EOF'
-          pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
-          dependencyResolutionManagement { repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS); repositories { google(); mavenCentral() } }
-          include ":app"
-          EOF
-          cat > build.gradle << 'EOF'
-          plugins { id 'com.android.application' version '8.2.0' apply false; id 'org.jetbrains.kotlin.android' version '1.9.10' apply false }
-          EOF
-          cat > app/build.gradle << 'EOF'
-          plugins { id 'com.android.application'; id 'org.jetbrains.kotlin.android' }
-          android {
-              namespace 'com.bykeno.fitlab'
-              compileSdk 34
-              defaultConfig { applicationId "com.bykeno.fitlab"; minSdk 26; targetSdk 34; versionCode 4; versionName "4.0-google" }
-              buildTypes { release { minifyEnabled false } debug { minifyEnabled false } }
-              compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
-              kotlinOptions { jvmTarget = '17' }
-              buildFeatures { viewBinding true }
-          }
-          dependencies {
-              implementation 'androidx.core:core-ktx:1.12.0'
-              implementation 'androidx.appcompat:appcompat:1.6.1'
-              implementation 'com.google.android.material:material:1.11.0'
-              implementation 'com.google.android.gms:play-services-fitness:21.1.0'
-              implementation 'com.google.android.gms:play-services-auth:20.7.0'
-              implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3'
-          }
-          EOF
-          cat > app/src/main/AndroidManifest.xml << 'EOF'
-          <?xml version="1.0" encoding="utf-8"?>
-          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-              <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION"/>
-              <application android:allowBackup="true" android:label="bykeno" android:theme="@style/Theme.Material3.DayNight">
-                  <activity android:name=".MainActivity" android:exported="true"><intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter></activity>
-              </application>
-          </manifest>
-          EOF
-          cat > app/src/main/res/layout/activity_main.xml << 'EOF'
-          <?xml version="1.0" encoding="utf-8"?>
-          <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:orientation="vertical" android:padding="24dp" android:layout_width="match_parent" android:layout_height="match_parent" android:background="#121212">
-              <TextView android:text="bykeno - FitLab GOOGLE" android:textSize="22sp" android:textStyle="bold" android:textColor="#FFFFFF" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
-              <com.google.android.material.button.MaterialButton android:id="@+id/googleBtn" android:text="Google ile giris yap - DeFit gibi" android:layout_marginTop="24dp" android:layout_width="match_parent" android:layout_height="60dp"/>
-              <TextView android:id="@+id/statusText" android:text="Google girisi yapilmadi" android:textColor="#CCCCCC" android:layout_marginTop="16dp" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
-              <com.google.android.material.slider.Slider android:id="@+id/speedSlider" android:value="5.0" android:valueFrom="1.0" android:valueTo="12.0" android:layout_marginTop="20dp" android:layout_width="match_parent" android:layout_height="wrap_content"/>
-              <TextView android:id="@+id/speedValue" android:text="5.0 km/h" android:textColor="#FFFFFF" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
-              <TextView android:id="@+id/addedSteps" android:text="0 addim" android:textSize="32sp" android:textColor="#D0BCFF" android:textStyle="bold" android:layout_marginTop="30dp" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
-              <com.google.android.material.button.MaterialButton android:id="@+id/startBtn" android:text="START SYNC" android:enabled="false" android:layout_marginTop="40dp" android:layout_width="match_parent" android:layout_height="60dp"/>
-          </LinearLayout>
-          EOF
-          cat > app/src/main/java/com/bykeno/fitlab/MainActivity.kt << 'EOF'
-          package com.bykeno.fitlab
-          import android.app.Activity
-          import android.os.Bundle
-          import android.widget.Toast
-          import androidx.appcompat.app.AppCompatActivity
-          import com.bykeno.fitlab.databinding.ActivityMainBinding
-          import com.google.android.gms.auth.api.signin.GoogleSignIn
-          import com.google.android.gms.auth.api.signin.GoogleSignInAccount
-          import com.google.android.gms.auth.api.signin.GoogleSignInOptions
-          import com.google.android.gms.fitness.Fitness
-          import com.google.android.gms.fitness.FitnessOptions
-          import com.google.android.gms.fitness.data.DataPoint
-          import com.google.android.gms.fitness.data.DataSet
-          import com.google.android.gms.fitness.data.DataSource
-          import com.google.android.gms.fitness.data.DataType
-          import com.google.android.gms.fitness.data.Field
-          import kotlinx.coroutines.*
-          import java.util.concurrent.TimeUnit
-          class MainActivity : AppCompatActivity() {
-              private lateinit var binding: ActivityMainBinding
-              private var account: GoogleSignInAccount? = null
-              private var isSyncing = false
-              private var job: Job? = null
-              private var total = 0
-              private val fitnessOptions = FitnessOptions.builder().addDataType(DataType.TYPE_STEP_COUNT_DELTA, FitnessOptions.ACCESS_WRITE).addDataType(DataType.TYPE_STEP_COUNT_DELTA, FitnessOptions.ACCESS_READ).addDataType(DataType.AGGREGATE_STEP_COUNT_DELTA, FitnessOptions.ACCESS_READ).build()
-              override fun onCreate(savedInstanceState: Bundle?) {
-                  super.onCreate(savedInstanceState)
-                  binding = ActivityMainBinding.inflate(layoutInflater)
-                  setContentView(binding.root)
-                  binding.speedSlider.addOnChangeListener { _, v, _ -> binding.speedValue.text = String.format("%.1f km/h", v) }
-                  binding.googleBtn.setOnClickListener { googleLogin() }
-                  binding.startBtn.setOnClickListener { if(isSyncing) stop() else start() }
-                  checkAccount()
-              }
-              fun checkAccount(){ val acc = GoogleSignIn.getLastSignedInAccount(this); if(acc!=null && GoogleSignIn.hasPermissions(acc, fitnessOptions)){ account=acc; binding.statusText.text="Google bagli: ${acc.email}"; binding.startBtn.isEnabled=true; binding.googleBtn.text="Baglandi: ${acc.email}" } }
-              fun googleLogin(){
-                  val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN).requestEmail().addExtension(fitnessOptions).build()
-                  val client = GoogleSignIn.getClient(this, gso)
-                  startActivityForResult(client.signInIntent, 1001)
-              }
-              override fun onActivityResult(requestCode: Int, resultCode: Int, data: android.content.Intent?) {
-                  super.onActivityResult(requestCode, resultCode, data)
-                  if(requestCode==1001){
-                      val task = GoogleSignIn.getSignedInAccountFromIntent(data)
-                      try{
-                          val acc = task.getResult(com.google.android.gms.common.api.ApiException::class.java)
-                          if(!GoogleSignIn.hasPermissions(acc, fitnessOptions)){
-                              GoogleSignIn.requestPermissions(this, 1002, acc, fitnessOptions)
-                          } else { account=acc; checkAccount(); Toast.makeText(this, "Google baglandi!", Toast.LENGTH_SHORT).show() }
-                      }catch(e:Exception){ Toast.makeText(this, "Giris olmadi: ${e.message}", Toast.LENGTH_LONG).show() }
-                  }
-                  if(requestCode==1002 && resultCode==Activity.RESULT_OK){ checkAccount() }
-              }
-              fun start(){
-                  val acc = account ?: return
-                  isSyncing=true; binding.startBtn.text="STOP SYNC"
-                  val speed = binding.speedSlider.value
-                  val stepsPerSec = (speed*2.5).toInt().coerceAtLeast(1)
-                  job = CoroutineScope(Dispatchers.Main).launch {
-                      while(isActive){
-                          try{
-                              val steps = stepsPerSec*5
-                              val now = System.currentTimeMillis()
-                              val start = now - 5000
-                              val dataSource = DataSource.Builder().setAppPackageName(packageName).setDataType(DataType.TYPE_STEP_COUNT_DELTA).setType(DataSource.TYPE_RAW).build()
-                              val dataSet = DataSet.create(dataSource)
-                              val point = DataPoint.builder(dataSource).setTimeInterval(start, now, TimeUnit.MILLISECONDS).setField(Field.FIELD_STEPS, steps).build()
-                              dataSet.add(point)
-                              withContext(Dispatchers.IO){
-                                  Fitness.getHistoryClient(this@MainActivity, acc).insertData(dataSet).addOnSuccessListener {
-                                      total+=steps
-                                      binding.addedSteps.text="$total addim"
-                                      binding.statusText.text="Google Fit-e yazildi: $total ✅"
-                                  }.addOnFailureListener { e -> binding.statusText.text="Hata: ${e.message}" }
-                              }
-                          }catch(e:Exception){ e.printStackTrace() }
-                          delay(5000)
-                      }
-                  }
-              }
-              fun stop(){ isSyncing=false; binding.startBtn.text="START SYNC"; job?.cancel(); binding.statusText.text="Dayandi - $total addim yazildi" }
-          }
-          EOF
-      - name: Build
+          if [ -f "bykeno-final-fixed.zip" ]; then unzip -o bykeno-final-fixed.zip; fi
+          if [ -f "bykeno-final.zip" ]; then unzip -o bykeno-final.zip; fi
+          ls -la app/src/main/java/com/bykeno/fitlab/
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: 8.5
+
+      - name: Build Debug APK
         run: gradle assembleDebug --stacktrace
-      - name: Upload
+
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: bykeno-google-fit
+          name: bykeno-google-fit-final
           path: app/build/outputs/apk/debug/app-debug.apk
