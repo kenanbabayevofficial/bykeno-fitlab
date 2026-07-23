@@ -1,26 +1,27 @@
-name: Build bykeno APK FIXED
+name: Build bykeno APK FIXED V3
 permissions:
   contents: read
 on: 
   push:
   workflow_dispatch:
-
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - name: Extract and PATCH only MainActivity
         run: |
+          ls -la
           if [ -f "bykeno-final.zip" ]; then unzip -o bykeno-final.zip; fi
+          if [ -f "bykeno-final-fixed.zip" ]; then unzip -o bykeno-final-fixed.zip; fi
+          mkdir -p app/src/main/java/com/bykeno/fitlab
+          mkdir -p app/src/main/res/layout
+          mkdir -p gradle/wrapper
           cat > settings.gradle << 'EOF'
           pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
           dependencyResolutionManagement { repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS); repositories { google(); mavenCentral() } }
           include ":app"
           EOF
-
-          # MANIFEST FIX
           cat > app/src/main/AndroidManifest.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
@@ -32,8 +33,6 @@ jobs:
               </application>
           </manifest>
           EOF
-
-          # FIXED MainActivity
           cat > app/src/main/java/com/bykeno/fitlab/MainActivity.kt << 'EOF'
           package com.bykeno.fitlab
           import android.os.Bundle
@@ -103,27 +102,21 @@ jobs:
               fun stop(){ isSyncing=false; binding.startBtn.text="START SYNC"; binding.statusText.text="Dayandi - $total addim"; job?.cancel() }
           }
           EOF
-          cat app/src/main/java/com/bykeno/fitlab/MainActivity.kt
-
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
           java-version: '17'
           distribution: 'temurin'
-
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
-
       - name: Setup Gradle 8.5
         uses: gradle/actions/setup-gradle@v3
         with:
           gradle-version: 8.5
-
       - name: Build Debug APK
         run: gradle assembleDebug --stacktrace
-
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: bykeno-apk-fixed-v2
+          name: bykeno-apk-fixed-v3
           path: app/build/outputs/apk/debug/app-debug.apk
