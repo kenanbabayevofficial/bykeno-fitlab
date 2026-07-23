@@ -1,4 +1,4 @@
-name: Build bykeno APK
+name: Build bykeno APK FIXED
 permissions:
   contents: read
 on: 
@@ -11,29 +11,149 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Extract and fix project
+      - name: Extract and create FIXED project
         run: |
-          if [ -f "bykeno-final.zip" ]; then
-            unzip -o bykeno-final.zip
-            rm bykeno-final.zip
-          fi
+          rm -rf app
+          mkdir -p app/src/main/java/com/bykeno/fitlab
+          mkdir -p app/src/main/res/layout
+          mkdir -p gradle/wrapper
+
+          # settings.gradle
           cat > settings.gradle << 'EOF'
           pluginManagement {
-              repositories {
-                  google()
-                  mavenCentral()
-                  gradlePluginPortal()
-              }
+              repositories { google(); mavenCentral(); gradlePluginPortal() }
           }
           dependencyResolutionManagement {
               repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
-              repositories {
-                  google()
-                  mavenCentral()
-              }
+              repositories { google(); mavenCentral() }
           }
           include ":app"
           EOF
+
+          # build.gradle root
+          cat > build.gradle << 'EOF'
+          plugins { id 'com.android.application' version '8.2.0' apply false; id 'org.jetbrains.kotlin.android' version '1.9.10' apply false }
+          EOF
+
+          # app/build.gradle
+          cat > app/build.gradle << 'EOF'
+          plugins { id 'com.android.application'; id 'org.jetbrains.kotlin.android' }
+          android {
+              namespace 'com.bykeno.fitlab'
+              compileSdk 34
+              defaultConfig { applicationId "com.bykeno.fitlab"; minSdk 26; targetSdk 34; versionCode 2; versionName "2.0-fixed" }
+              buildTypes { release { minifyEnabled false } debug { minifyEnabled false } }
+              compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+              kotlinOptions { jvmTarget = '17' }
+              buildFeatures { viewBinding true }
+          }
+          dependencies {
+              implementation 'androidx.core:core-ktx:1.12.0'
+              implementation 'androidx.appcompat:appcompat:1.6.1'
+              implementation 'com.google.android.material:material:1.11.0'
+              implementation 'androidx.health.connect:connect-client:1.1.0-alpha07'
+              implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3'
+          }
+          EOF
+
+          # AndroidManifest with Health Connect query
+          cat > app/src/main/AndroidManifest.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <uses-permission android:name="android.permission.health.READ_STEPS"/>
+              <uses-permission android:name="android.permission.health.WRITE_STEPS"/>
+              <queries><package android:name="com.google.android.apps.healthdata" /></queries>
+              <application android:allowBackup="true" android:label="bykeno" android:theme="@style/Theme.Material3.DayNight">
+                  <activity android:name=".MainActivity" android:exported="true"><intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter></activity>
+              </application>
+          </manifest>
+          EOF
+
+          # layout
+          cat > app/src/main/res/layout/activity_main.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:orientation="vertical" android:padding="24dp" android:layout_width="match_parent" android:layout_height="match_parent" android:background="#121212">
+              <TextView android:text="bykeno - FitLab v2 FIXED" android:textSize="24sp" android:textStyle="bold" android:textColor="#FFFFFF" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
+              <TextView android:id="@+id/statusText" android:text="Hazirdir - Health Connect icazesi verilecek" android:textColor="#CCCCCC" android:layout_marginTop="16dp" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
+              <com.google.android.material.slider.Slider android:id="@+id/speedSlider" android:value="5.0" android:valueFrom="1.0" android:valueTo="12.0" android:layout_marginTop="20dp" android:layout_width="match_parent" android:layout_height="wrap_content"/>
+              <TextView android:id="@+id/speedValue" android:text="5.0 km/h" android:textColor="#FFFFFF" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
+              <TextView android:id="@+id/addedSteps" android:text="0 addim" android:textSize="32sp" android:textColor="#D0BCFF" android:textStyle="bold" android:layout_marginTop="30dp" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
+              <com.google.android.material.button.MaterialButton android:id="@+id/startBtn" android:text="START SYNC" android:layout_marginTop="40dp" android:layout_width="match_parent" android:layout_height="60dp"/>
+          </LinearLayout>
+          EOF
+
+          # FIXED MainActivity - her 5 saniyede artir + icaze sorusur
+          cat > app/src/main/java/com/bykeno/fitlab/MainActivity.kt << 'EOF'
+          package com.bykeno.fitlab
+          import android.os.Bundle
+          import android.widget.Toast
+          import androidx.appcompat.app.AppCompatActivity
+          import androidx.health.connect.client.HealthConnectClient
+          import androidx.health.connect.client.PermissionController
+          import androidx.health.connect.client.permission.HealthPermission
+          import androidx.health.connect.client.records.StepsRecord
+          import com.bykeno.fitlab.databinding.ActivityMainBinding
+          import kotlinx.coroutines.*
+          import java.time.Instant
+          import java.time.ZoneOffset
+          class MainActivity : AppCompatActivity() {
+              private lateinit var binding: ActivityMainBinding
+              private var isSyncing = false
+              private var job: Job? = null
+              private var total = 0
+              private var healthClient: HealthConnectClient? = null
+              private val permissions = setOf(HealthPermission.getReadPermission(StepsRecord::class), HealthPermission.getWritePermission(StepsRecord::class))
+              private lateinit var launcher: androidx.activity.result.ActivityResultLauncher<Set<String>>
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  super.onCreate(savedInstanceState)
+                  binding = ActivityMainBinding.inflate(layoutInflater)
+                  setContentView(binding.root)
+                  binding.speedSlider.addOnChangeListener { _, v, _ -> binding.speedValue.text = String.format("%.1f km/h", v) }
+                  launcher = registerForActivityResult(PermissionController.createRequestPermissionResultContract()) { granted ->
+                      if(granted.containsAll(permissions)) { Toast.makeText(this, "Icaze verildi!", Toast.LENGTH_SHORT).show(); reallyStart() }
+                      else { Toast.makeText(this, "Health Connect-de bykeno-ya icaze ver!", Toast.LENGTH_LONG).show() }
+                  }
+                  if(HealthConnectClient.getSdkStatus(this)==HealthConnectClient.SDK_AVAILABLE) healthClient = HealthConnectClient.getOrCreate(this)
+                  binding.startBtn.setOnClickListener { if(isSyncing) stop() else start() }
+              }
+              fun start(){
+                  if(healthClient!=null){
+                      CoroutineScope(Dispatchers.IO).launch {
+                          val g = healthClient!!.permissionController.getGrantedPermissions()
+                          withContext(Dispatchers.Main){ if(!g.containsAll(permissions)) launcher.launch(permissions) else reallyStart() }
+                      }
+                  } else reallyStart()
+              }
+              fun reallyStart(){
+                  isSyncing=true; binding.startBtn.text="STOP SYNC"
+                  val speed = binding.speedSlider.value
+                  val stepsPerSec = (speed*2.5).toInt().coerceAtLeast(1)
+                  job = CoroutineScope(Dispatchers.IO).launch {
+                      while(isActive){
+                          try{
+                              val now = Instant.now()
+                              val steps = stepsPerSec*5
+                              if(healthClient!=null){
+                                  try{
+                                      val rec = StepsRecord(count=steps.toLong(), startTime=now.minusSeconds(5), endTime=now, startZoneOffset=ZoneOffset.UTC, endZoneOffset=ZoneOffset.UTC)
+                                      healthClient!!.insertRecords(listOf(rec))
+                                  }catch(e:Exception){ e.printStackTrace() }
+                              }
+                              total+=steps
+                              withContext(Dispatchers.Main){
+                                  binding.addedSteps.text="$total addim"
+                                  binding.statusText.text="Yazilir... $total addim ✅"
+                              }
+                          }catch(e:Exception){}
+                          delay(5000)
+                      }
+                  }
+              }
+              fun stop(){ isSyncing=false; binding.startBtn.text="START SYNC"; binding.statusText.text="Dayandi - $total addim"; job?.cancel() }
+          }
+          EOF
+
+          echo "project fixed"
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -55,5 +175,5 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: bykeno-apk
+          name: bykeno-apk-fixed-v2
           path: app/build/outputs/apk/debug/app-debug.apk
